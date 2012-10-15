@@ -213,7 +213,7 @@ class WP_GitHub_Updater
 	} 
 	
 	/**
-	 * Callback fn for the http_request_timeout filter
+	 * Callback for the http_request_timeout filter
 	 *
 	 * @since	1.0
 	 * @return	int	$timeout	Timeout value

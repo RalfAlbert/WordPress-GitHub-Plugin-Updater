@@ -44,6 +44,7 @@ function github_plugin_updater_test_init() {
 	if (is_admin()) { // note the use of is_admin() to double check that this is happening in the admin
 
 		$config = array(
+			'file'		=> __FILE__,
 			'user'		=> 'RalfAlbert',
 			'repo'		=> 'WordPress-GitHub-Plugin-Updater',
 			'requires'	=> '3.0',
