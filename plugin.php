@@ -45,16 +45,16 @@ function github_plugin_updater_test_init() {
 	if( is_admin() ){
 
 		$config = array(
-				
+
 			// required data
 			'file'		=> __FILE__,
 			'user'		=> 'RalfAlbert',
 			'repo'		=> 'WordPress-GitHub-Plugin-Updater',
-				
+
 			// optional data
 			'requires'	=> '3.0',
-			'tested'	=> '3.3',
-			
+			'tested'	=> '3.4',
+
 		);
 
 		new  WP_GitHub_Updater( $config );
