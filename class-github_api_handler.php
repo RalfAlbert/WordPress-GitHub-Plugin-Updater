@@ -1,4 +1,30 @@
 <?php
+/**
+ * @version		1.1
+ * @author		Ralf Albert <me@neun12.de>
+ * @link		https://github.com/RalfAlbert/WordPress-GitHub-Plugin-Updater
+ * @package		WordPress
+ * @subpackage	WordPress-GitHub-Plugin-Updater
+ * @license		http://www.gnu.org/copyleft/gpl.html GNU Public License
+ *
+ * GNU General Public License, Free Software Foundation
+ * <http://creativecommons.org/licenses/GPL/2.0/>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ */
+
 /*
  * The GitHub-Handler
  *
@@ -10,7 +36,7 @@
  */
 if( ! class_exists( 'GitHub_Api_Handler' ) ){
 
-class GitHub_Api_Handler
+class GitHub_Api_Handler extends WP_GitHub_Updater
 {
 	/**
 	 * The basic api-url from GitHub
@@ -28,6 +54,8 @@ class GitHub_Api_Handler
 			'rawurl' 		=> 'https://raw.github.com/%user%/%repo%/master',
 			'giturl' 		=> 'https://github.com/%user%/%repo%',
 			'zipurl' 		=> 'https://github.com/%user%/%repo%/zipball/master',
+			//'ratelimit'		=> 'https://api.github.com/users/%user%',
+			'ratelimit'		=> 'https://api.github.com/rate_limit', // checking rate-limit without incurring the API
 
 			'basic'			=> 'repos/%user%/%repo%',
 			'all_repos' 	=> 'users/%user%/repos',
@@ -121,13 +149,25 @@ class GitHub_Api_Handler
 	);
 
 	/**
+	 * Flag for errors
+	 */
+	public $error = FALSE;
+
+	/**
 	 * Constructor
+	 *
+	 */
+	public function __construct(){}
+
+
+	/**
+	 * Setup the class
 	 *
 	 * @param	string	$user	GitHub username
 	 * @param	string	$repo	GitHub repository
 	 * @param	array	$config	Extra configuration
 	 */
-	public function __construct( $user, $repo, $config = array() ){
+	public function setup( $user, $repo, $config = array() ){
 
 		$this->user = (string) $user;
 		$this->repo = (string) $repo;
@@ -149,20 +189,23 @@ class GitHub_Api_Handler
 
 		// copy configuration
 		foreach( $config as $key => $value )
-			$this->$$key = $value;
+			$this->$key = $value;
 
 		// some tests
-		if( ! in_array( $this->search_places, $this->method ) )
+		if( ! in_array( $this->method, $this->search_places ) )
 			$this->method = 'commit-message';
 
 		// be nice, cleanup
 		unset( $config );
 
 		// init urls
-		foreach( $this->api_urls as $key => $url ){
-			$this->urls[$key] = str_replace( '%user%', $this->user, $this->urls[$key] );
-			$this->urls[$key] = str_replace( '%repo%', $this->repo, $this->urls[$key] );
+		foreach( $this->api_urls as &$url ){
+			$url = str_replace( '%user%', $this->user, $url );
+			$url = str_replace( '%repo%', $this->repo, $url );
 		}
+
+		// clear reference
+		unset( $url );
 
 		// See Downloading a zipball (private repo) https://help.github.com/articles/downloading-files-from-the-command-line
 		if( ! empty( $this->access_token ) ){
@@ -171,7 +214,7 @@ class GitHub_Api_Handler
 		}
 
 		// fill the cache
-		$this->cache = $this->get_github_data( 'basic' );
+		$this->get_github_data( 'basic' );
 
 		// complete PCRE search pattern
 		$this->search_pattern = sprintf( '/%s/iu', $this->search_pattern_version );
@@ -240,14 +283,29 @@ class GitHub_Api_Handler
 	 */
 	protected function get_version_from_commit_message(){
 
-		$repo	= $this->get_repo();
-		$ref	= $this->get_ref( $repo->master_branch);
-		$sha	= $this->object->sha;
-		$commit	= $this->get_last_commit( $sha );
+		$result = '';
 
-		preg_match_all( $this->pattern, $commit->message, $matches );
+		$repo = $this->get_repo();
 
-		return ( isset( $matches[1] ) && ! empty( $matches[1] ) ) ? trim( $matches[1] ) : NULL;
+		if( FALSE === $this->error )
+			$ref = $this->get_ref( $repo->master_branch);
+
+		if( FALSE === $this->error )
+			$commit	= $this->get_last_commit( $ref->object->sha );
+
+		if( FALSE === $this->error ){
+
+			preg_match_all( $this->search_pattern, $commit->message, $matches );
+
+			$result = &$matches[1][0];
+
+		} else {
+
+			$this->set_error( 'warning', __( 'Error while fetching version from commit-message', self::LANG ) );
+
+		}
+
+		return ( isset( $result ) && ! empty( $result ) ) ? trim( $result ) : NULL;
 
 	}
 
@@ -257,6 +315,8 @@ class GitHub_Api_Handler
 	 */
 	protected function get_version_from_file(){
 
+		$result = '';
+
 		if( empty( $this->file_contains_version ) )
 			$this->file_contains_version = 'readme.md';
 
@@ -265,13 +325,23 @@ class GitHub_Api_Handler
 
 		$raw_response = wp_remote_get( $query, array('sslverify' => $this->config['sslverify']) );
 
-		if ( is_wp_error( $raw_response ) )
-			return FALSE;
+		if ( is_wp_error( $raw_response ) ){
 
-		preg_match( $this->pattern, $raw_response['body'], $version );
+			$this->error = TRUE;
+			$this->set_error(
+					'warning',
+					sprintf( '%s: %s', __( 'Error while fetching version from file', self::LANG ), $raw_response->get_error_message() )
+			);
 
-		return ( isset( $version['1'] ) && ! empty( $version[1] ) ) ?
-			$version[1] : NULL;
+		} else {
+
+			preg_match( $this->serach_pattern, $raw_response['body'], $version );
+
+			$result = &$version[1];
+
+		}
+
+		return ( isset( $result ) && ! empty( $result ) ) ? trim( $result ) : NULL;
 
 	}
 
@@ -281,10 +351,17 @@ class GitHub_Api_Handler
 	 */
 	protected function get_version_from_tag(){
 
-		$repo	= $this->get_repo();
-		$ref	= $this->get_ref( $repo->master_branch);
-		$sha	= $this->object->sha;
-		$tag	= $this->get_tag( $sha );
+		$tag = new stdClass;
+
+		$repo = $this->get_repo();
+
+		if( FALSE === $this->error )
+			$ref = $this->get_ref( $repo->master_branch);
+
+		if( FALSE === $this->error )
+			$tag = $this->get_tag( $ref->object->sha );
+		else
+			$this->set_error( 'warning', __( 'Error while fetching version from tag', self::LANG ) );
 
 		return ( isset( $tag->tag ) && ! empty( $tag->tag ) ) ? $tag->tag : NULL;
 
@@ -298,12 +375,21 @@ class GitHub_Api_Handler
 	 */
 	protected function get_github_data( $id = 'basic', $extra_arg = '' ){
 
-		if( 'basic' === $id && ! empty( $this->cache ) )
-			return $this->cache;
+		$response = '';
+		$cache = array();
+
+		$cache = get_site_transient( $this->slug . '_github_data' );
+
+		if( isset( $cache[$id] ) && ! empty( $cache[$id] ) )
+			return $cache[$id];
+
 
 		if( ! function_exists( 'wp_remote_get' ) )
 			require_once ABSPATH . '/wp-includes/http.php';
 
+// 		if( FALSE === $this->check_rate_limit() )
+// 			return NULL;
+		$this->check_rate_limit();
 
 		if( ! key_exists( $id, $this->api_urls ) )
 			$id = 'basic';
@@ -317,10 +403,77 @@ class GitHub_Api_Handler
 
 		$raw_response = wp_remote_get( $url, array( 'sslverify' => $this->sslverify ) );
 
-		if( is_wp_error( $raw_response ) )
-			return NULL;
-		else
-			return json_decode( $raw_response, $this->return_as_array );
+		if( is_wp_error( $raw_response ) ){
+
+			$this->error = TRUE;
+			$this->set_error(
+					'warning',
+					sprintf( '%s: %s', __( 'Try to get data from the GitHub repo, but an error occurred', self::LANG ), $raw_response->get_error_message() )
+			);
+
+		} else {
+
+			if( 200 !== (int) $raw_response['response']['code'] ){
+
+				$body = (object) json_decode( $raw_response['body'] );
+				if( ! isset( $body->message ) )
+					$body->message = 'No message';
+
+				$this->error = TRUE;
+				$this->set_error(
+					'warning',
+					sprintf( '%s: %s', __( 'Try to get data from the GitHub repo, but an error occurred', self::LANG ), $body->message )
+				);
+
+			} else {
+
+				$response = json_decode( $raw_response['body'], $this->return_as_array );
+				$cache[$id] = $response;
+				set_site_transient( $this->slug . '_github_data', $cache, self::HOUR );
+
+			}
+
+		}
+
+		return ( isset( $response ) && ! empty( $response ) ) ? $response : NULL;
+
+	}
+
+	/**
+	 * Checking if the rate limit is exceeded
+	 * @return	boolean		anonymous	True if the rate limit is not exceeded, else false.
+	 */
+	protected function check_rate_limit(){
+
+		// check rate-limiting (per IP)
+		$raw_response = wp_remote_get( $this->api_urls['ratelimit'], array( 'sslverify' => $this->sslverify ) );
+
+		if( is_wp_error( $raw_response ) ){
+
+			$this->error = TRUE;
+			$this->set_error(
+					'warning',
+					sprintf( '%s: %s', __( 'An error occurred while fetching the rate-limit', self::LANG ), $raw_response->get_error_message() )
+			);
+
+		} else {
+
+			$headers = &$raw_response['headers'];
+
+			$remaining = $headers['x-ratelimit-remaining'];
+			$ratelimit = $headers['x-ratelimit-limit'];
+
+			if( 0 >= $remaining ){
+
+				$this->error = TRUE;
+				$this->set_error( 'warning', sprintf( __( 'Rate limit of %d api-calls is exceeded.', self::LANG ), $ratelimit ) );
+				return FALSE;
+
+			}
+
+		}
+
+		return TRUE;
 
 	}
 
@@ -357,7 +510,7 @@ class GitHub_Api_Handler
 	 */
 	protected function get_ref( $ref = '' ){
 
-		if( '' == $ref )
+		if( empty( $ref ) )
 			$ref = 'heads/master';
 		else
 			$ref = sprintf( 'heads/%s', str_replace( 'heads/', '', $ref ) );
