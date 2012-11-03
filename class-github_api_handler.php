@@ -1,30 +1,4 @@
 <?php
-/**
- * @version		1.1
- * @author		Ralf Albert <me@neun12.de>
- * @link		https://github.com/RalfAlbert/WordPress-GitHub-Plugin-Updater
- * @package		WordPress
- * @subpackage	WordPress-GitHub-Plugin-Updater
- * @license		http://www.gnu.org/copyleft/gpl.html GNU Public License
- *
- * GNU General Public License, Free Software Foundation
- * <http://creativecommons.org/licenses/GPL/2.0/>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- */
-
 /*
  * The GitHub-Handler
  *
@@ -157,8 +131,9 @@ class GitHub_Api_Handler extends WP_GitHub_Updater
 	 * Constructor
 	 *
 	 */
-	public function __construct(){}
-
+	public function __construct(){
+		// avoid calling parent::__construct()
+	}
 
 	/**
 	 * Setup the class
@@ -172,7 +147,7 @@ class GitHub_Api_Handler extends WP_GitHub_Updater
 		$this->user = (string) $user;
 		$this->repo = (string) $repo;
 
-		$this->init( $config );
+		$this->_init_handler( $config );
 
 		return TRUE;
 
@@ -182,7 +157,7 @@ class GitHub_Api_Handler extends WP_GitHub_Updater
 	 * Initialize and setup the class-vars
 	 * @param	array	$config	Configuration
 	 */
-	protected function init( $config = array() ){
+	protected function _init_handler( $config = array() ){
 
 		// setup configuration defaults
 		$config = wp_parse_args( $config, $this->config );
@@ -209,8 +184,10 @@ class GitHub_Api_Handler extends WP_GitHub_Updater
 
 		// See Downloading a zipball (private repo) https://help.github.com/articles/downloading-files-from-the-command-line
 		if( ! empty( $this->access_token ) ){
+
 			$this->api_urls['apiurl'] = add_query_arg( array( 'access_token' => $this->access_token ), $this->api_urls['apiurl'] );
 			$this->api_urls['zipurl'] = add_query_arg( array( 'access_token' => $this->access_token ), $this->api_urls['zipurl'] );
+
 		}
 
 		// fill the cache
@@ -378,7 +355,10 @@ class GitHub_Api_Handler extends WP_GitHub_Updater
 		$response = '';
 		$cache = array();
 
-		$cache = get_site_transient( $this->slug . '_github_data' );
+		if( defined('WP_GITHUB_FORCE_UPDATE') && TRUE == WP_GITHUB_FORCE_UPDATE )
+			delete_site_transient( parent::$slug . '_github_data' );
+
+		$cache = get_site_transient( parent::$slug . '_github_data' );
 
 		if( isset( $cache[$id] ) && ! empty( $cache[$id] ) )
 			return $cache[$id];
@@ -429,7 +409,7 @@ class GitHub_Api_Handler extends WP_GitHub_Updater
 
 				$response = json_decode( $raw_response['body'], $this->return_as_array );
 				$cache[$id] = $response;
-				set_site_transient( $this->slug . '_github_data', $cache, self::HOUR );
+				set_site_transient( parent::$slug . '_github_data', $cache, self::HOUR );
 
 			}
 
